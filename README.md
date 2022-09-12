@@ -4,6 +4,9 @@
 * 仓库不定期更新
 * [test](https://github.com/ADJazzDEV/OpenWrt-package/tree/test)分支为[lede](https://github.com/coolsnowwolf/openwrt)的补充包
 
+#### 已知问题
+* adguardhome 缺失依赖'ca-certs'无法编译
+
 #### 使用
 ```
 src-git adjazz https://github.com/ADJazzDEV/OpenWrt-package
