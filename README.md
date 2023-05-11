@@ -8,5 +8,5 @@
 
 #### 使用
 ```
-src-git adjazz https://github.com/ADJazzDEV/OpenWrt-package
+src-git adjazz https://github.com/ADJazzzz/OpenWrt-package
 ```
