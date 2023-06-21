@@ -1,0 +1,53 @@
+name: Build Packages
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 12 * * 5'
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    name: Build ${{ matrix.arch }} Packages
+    strategy:
+      matrix:
+        arch: [ramips-mt7621, rockchip-armv8]
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+
+    - name: Build
+      id: build
+      uses: openwrt/gh-action-sdk@main
+      env:
+        ARCH: ${{ matrix.arch }}-master
+        ARTIFACTS_DIR: ${{ github.workspace }}/artifacts
+        FEED_DIR: ${{ github.workspace }}/feed
+        packages: luci-app-passwall luci-app-passwall2 luci-app-ssr-plus luci-app-openclash
+
+    - name: Upload Packages
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ matrix.arch }}
+        path: artifacts/bin/packages/${{ matrix.arch }}/packages/*.ipk
+
+    - name: Generate Release Tag
+      id: tag
+      run: |
+        touch release.txt
+        echo -e "**使用**\n" >> release.txt
+        echo -e " 将所需要的ipk文件上传到openwrt设备的tmp目录，输入命令 \`opkg install *.ipk\`\n" >> release.txt
+        echo "RELEASE_TAG=$(date +"%Y.%m.%d-%H%M")" >> "$GITHUB_OUTPUT"
+        
+
+    - name: Upload Firmware To Release
+      uses: softprops/action-gh-release@v0.1.15
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: Build-${{ steps.tag.outputs.RELEASE_TAG }}
+        body_path: release.txt
+        files: artifacts/bin/packages/${{ matrix.arch }}/packages/*.ipk
