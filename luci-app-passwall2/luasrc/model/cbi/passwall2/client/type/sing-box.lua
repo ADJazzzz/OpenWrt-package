@@ -2,11 +2,13 @@ local m, s = ...
 
 local api = require "luci.passwall2.api"
 
-if not api.is_finded("sing-box") then
+local singbox_bin = api.finded_com("singbox")
+
+if not singbox_bin then
 	return
 end
 
-local singbox_tags = luci.sys.exec(api.finded("sing-box") .. " version  | grep 'Tags:' | awk '{print $2}'")
+local singbox_tags = luci.sys.exec(singbox_bin .. " version  | grep 'Tags:' | awk '{print $2}'")
 
 local appname = api.appname
 local uci = api.uci
@@ -323,6 +325,9 @@ if singbox_tags:find("with_quic") then
 
 	o = s:option(Flag, option_name("hysteria_disable_mtu_discovery"), translate("Disable MTU detection"))
 	o:depends({ [option_name("protocol")] = "hysteria" })
+
+	o = s:option(Value, option_name("hysteria_alpn"), translate("QUIC TLS ALPN"))
+	o:depends({ [option_name("protocol")] = "hysteria" })
 end
 
 if singbox_tags:find("with_quic") then
@@ -406,10 +411,16 @@ o:depends({ [option_name("tls")] = true })
 
 o = s:option(Value, option_name("tls_serverName"), translate("Domain"))
 o:depends({ [option_name("tls")] = true })
+o:depends({ [option_name("protocol")] = "hysteria"})
+o:depends({ [option_name("protocol")] = "tuic" })
+o:depends({ [option_name("protocol")] = "hysteria2" })
 
 o = s:option(Flag, option_name("tls_allowInsecure"), translate("allowInsecure"), translate("Whether unsafe connections are allowed. When checked, Certificate validation will be skipped."))
 o.default = "0"
 o:depends({ [option_name("tls")] = true })
+o:depends({ [option_name("protocol")] = "hysteria"})
+o:depends({ [option_name("protocol")] = "tuic" })
+o:depends({ [option_name("protocol")] = "hysteria2" })
 
 if singbox_tags:find("with_utls") then
 	o = s:option(Flag, option_name("utls"), translate("uTLS"))
