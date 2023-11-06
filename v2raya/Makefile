@@ -5,12 +5,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=v2rayA
-PKG_VERSION:=2.2.3
+PKG_VERSION:=2.2.4.1
 PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/v2rayA/v2rayA/tar.gz/v$(PKG_VERSION)?
-PKG_HASH:=44f6d1f6ed7a03c1ec928b6551c8544463491c9fc53142f57aabbc534f104e56
+PKG_HASH:=e0d8a2250f9933ca1d1efe023a7ec7d6d5f9a4d058a8a7270c457a8d1e0b4ab9
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)/service
 
 PKG_LICENSE:=AGPL-3.0-only
@@ -20,6 +20,7 @@ PKG_MAINTAINER:=Tianling Shen <cnsztl@immortalwrt.org>
 PKG_BUILD_DEPENDS:=golang/host
 PKG_BUILD_PARALLEL:=1
 PKG_USE_MIPS16:=0
+PKG_BUILD_FLAGS:=no-mips16
 
 GO_PKG:=github.com/v2rayA/v2rayA
 GO_PKG_LDFLAGS_X:= \
@@ -37,7 +38,10 @@ define Package/v2raya
   SECTION:=net
   CATEGORY:=Network
   SUBMENU:=Web Servers/Proxies
-  DEPENDS:=$(GO_ARCH_DEPENDS) +ca-bundle
+  DEPENDS:=$(GO_ARCH_DEPENDS) \
+    +ca-bundle \
+    +kmod-nft-tproxy \
+    +xray-core
   URL:=https://v2raya.org
 endef
 
@@ -56,17 +60,15 @@ define Download/v2raya-web
 	URL:=https://codeload.github.com/v2rayA/v2raya-web/tar.gz/v$(PKG_VERSION)?
 	URL_FILE:=$(WEB_FILE)
 	FILE:=$(WEB_FILE)
-	HASH:=fe02b55198067dca1cf3edb92adef55062f88022c8ba174cb312478b27bdcc9e
+        HASH:=skip
 endef
-
-GO_PKG_TARGET_VARS:=$(filter-out CGO_ENABLED=%,$(GO_PKG_TARGET_VARS)) CGO_ENABLED=0
 
 define Build/Prepare
 	$(call Build/Prepare/Default)
 
 	( \
 		mkdir -p $(PKG_BUILD_DIR)/server/router/web ; \
-		gzip -dc $(DL_DIR)/$(WEB_FILE) | $(HOST_TAR) -C $(PKG_BUILD_DIR)/server/router/web $(TAR_OPTIONS) ; \
+		unzip -q -d $(PKG_BUILD_DIR)/server/router/web $(DL_DIR)/$(WEB_FILE) ; \
 	)
 endef
 
