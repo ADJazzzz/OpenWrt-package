@@ -710,10 +710,12 @@ add_firewall_rule() {
 		nft "flush chain inet fw4 PSW2_ICMP_REDIRECT"
 		nft "add rule inet fw4 PSW2_ICMP_REDIRECT ip daddr @$NFTSET_LANLIST counter return"
 		nft "add rule inet fw4 PSW2_ICMP_REDIRECT ip daddr @$NFTSET_VPSLIST counter return"
+		[ "${WRITE_IPSET_DIRECT}" = "1" ] && nft "add rule inet fw4 PSW2_ICMP_REDIRECT ip daddr @$nftset_global_whitelist counter return"
 
 		[ "$accept_icmpv6" = "1" ] && {
 			nft "add rule inet fw4 PSW2_ICMP_REDIRECT ip6 daddr @$NFTSET_LANLIST6 counter return"
 			nft "add rule inet fw4 PSW2_ICMP_REDIRECT ip6 daddr @$NFTSET_VPSLIST6 counter return"
+			[ "${WRITE_IPSET_DIRECT}" = "1" ] && nft "add rule inet fw4 PSW2_ICMP_REDIRECT ip6 daddr @$nftset_global_whitelist6 counter return"
 		}
 
 		nft "add rule inet fw4 dstnat meta l4proto {icmp,icmpv6} counter jump PSW2_ICMP_REDIRECT"
@@ -722,7 +724,8 @@ add_firewall_rule() {
 
 	WAN_IP=$(get_wan_ip)
 	if [ -n "${WAN_IP}" ]; then
-		[ -n "${is_tproxy}" ] && nft "add rule inet fw4 PSW2_MANGLE ip daddr ${WAN_IP} counter return comment \"WAN_IP_RETURN\"" || nft "add rule inet fw4 PSW2_NAT ip daddr ${WAN_IP} counter return comment \"WAN_IP_RETURN\""
+		nft "add rule inet fw4 PSW2_MANGLE ip daddr ${WAN_IP} counter return comment \"WAN_IP_RETURN\""
+		[ -z "${is_tproxy}" ] && nft "add rule inet fw4 PSW2_NAT ip daddr ${WAN_IP} counter return comment \"WAN_IP_RETURN\""
 	fi
 	unset WAN_IP
 
