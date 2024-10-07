@@ -144,6 +144,9 @@ do
 	if true then
 		local i = 0
 		local option = "lbss"
+		local function is_ip_port(str)
+			return str:match("^%d+%.%d+%.%d+%.%d+:%d+$") ~= nil
+		end
 		uci:foreach(appname, "haproxy_config", function(t)
 			i = i + 1
 			local node_id = t[option]
@@ -153,11 +156,17 @@ do
 				remarks = "HAProxy负载均衡节点列表[" .. i .. "]",
 				currentNode = node_id and uci:get_all(appname, node_id) or nil,
 				set = function(o, server)
-					uci:set(appname, t[".name"], option, server)
-					o.newNodeId = server
+					-- 如果当前 lbss 值不是 ip:port 格式，才进行修改
+					if not is_ip_port(t[option]) then
+						uci:set(appname, t[".name"], option, server)
+						o.newNodeId = server
+					end
 				end,
 				delete = function(o)
-					uci:delete(appname, t[".name"])
+					-- 如果当前 lbss 值不是 ip:port 格式，才进行删除
+					if not is_ip_port(t[option]) then
+						uci:delete(appname, t[".name"])
+					end
 				end
 			}
 		end)
@@ -491,6 +500,10 @@ local function processData(szType, content, add_mode, add_from)
 		if info.net == 'splithttp' then
 			result.splithttp_host = info.host
 			result.splithttp_path = info.path
+		end
+		if info.net == 'httpupgrade' then
+			result.httpupgrade_host = info.host
+			result.httpupgrade_path = info.path
 		end
 		if not info.security then result.security = "auto" end
 		if info.tls == "tls" or info.tls == "1" then
@@ -835,7 +848,11 @@ local function processData(szType, content, add_mode, add_from)
 				result.splithttp_host = params.host
 				result.splithttp_path = params.path
 			end
-			
+			if params.type == 'httpupgrade' then
+				result.httpupgrade_host = params.host
+				result.httpupgrade_path = params.path
+			end
+
 			result.encryption = params.encryption or "none"
 
 			result.flow = params.flow or nil
@@ -967,6 +984,10 @@ local function processData(szType, content, add_mode, add_from)
 			if params.type == 'splithttp' then
 				result.splithttp_host = params.host
 				result.splithttp_path = params.path
+			end
+			if params.type == 'httpupgrade' then
+				result.httpupgrade_host = params.host
+				result.httpupgrade_path = params.path
 			end
 			
 			result.encryption = params.encryption or "none"
