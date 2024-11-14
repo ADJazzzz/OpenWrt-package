@@ -694,8 +694,11 @@ local default_file_tree = {
 	x86_64  = "amd64",
 	x86     = "386",
 	aarch64 = "arm64",
+	rockchip = "arm64",
 	mips    = "mips",
-	mipsel  = "mipsle",
+	mips64  = "mips64",
+	mipsel  = "mipsel",
+	mips64el = "mips64el",
 	armv5   = "arm.*5",
 	armv6   = "arm.*6[^4]*",
 	armv7   = "arm.*7",
@@ -760,7 +763,7 @@ function to_check(arch, app_name)
 		remote_version = remote_version:gsub(com[app_name].remote_version_str_replace, "")
 	end
 	local has_update = compare_versions(local_version:match("[^v]+"), "<", remote_version:match("[^v]+"))
-
+--[[
 	if not has_update then
 		return {
 			code = 0,
@@ -768,7 +771,7 @@ function to_check(arch, app_name)
 			remote_version = remote_version
 		}
 	end
-
+]]
 	local asset = {}
 	for _, v in ipairs(json.assets) do
 		if v.name and v.name:match(match_file_name) then
@@ -789,7 +792,7 @@ function to_check(arch, app_name)
 
 	return {
 		code = 0,
-		has_update = true,
+		has_update = has_update,
 		local_version = local_version,
 		remote_version = remote_version,
 		html_url = json.html_url,
