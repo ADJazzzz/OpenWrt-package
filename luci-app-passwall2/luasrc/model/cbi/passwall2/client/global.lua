@@ -91,12 +91,16 @@ if (has_singbox or has_xray) and #nodes_table > 0 then
 	end
 	local function get_write(shunt_node_id, option)
 		return function(self, section, value)
-			m:set(shunt_node_id, option, value)
+			if s.fields["node"]:formvalue(section) == shunt_node_id then
+				m:set(shunt_node_id, option, value)
+			end
 		end
 	end
 	local function get_remove(shunt_node_id, option)
 		return function(self, section)
-			m:del(shunt_node_id, option)
+			if s.fields["node"]:formvalue(section) == shunt_node_id then
+				m:del(shunt_node_id, option)
+			end
 		end
 	end
 	if #normal_list > 0 then
@@ -301,7 +305,6 @@ o = s:taboption("DNS", Value, "remote_dns_client_ip", translate("Remote DNS EDNS
 o.description = translate("Notify the DNS server when the DNS query is notified, the location of the client (cannot be a private IP address).") .. "<br />" ..
 				translate("This feature requires the DNS server to support the Edns Client Subnet (RFC7871).")
 o.datatype = "ipaddr"
-o:depends({ __hide = true })
 
 o = s:taboption("DNS", ListValue, "remote_dns_detour", translate("Remote DNS Outbound"))
 o.default = "remote"
@@ -348,8 +351,6 @@ o.template = "passwall2/cbi/hidevalue"
 o.value = "1"
 o:depends({ __hide = true })
 
-s.fields["remote_dns_client_ip"]:depends({ _xray_node = "1", remote_dns_protocol = "tcp" })
-s.fields["remote_dns_client_ip"]:depends({ _xray_node = "1", remote_dns_protocol = "doh" })
 s.fields["dns_hosts"]:depends({ _xray_node = "1" })
 
 s:tab("log", translate("Log"))
