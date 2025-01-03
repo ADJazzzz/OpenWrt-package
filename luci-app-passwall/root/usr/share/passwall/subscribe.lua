@@ -465,6 +465,7 @@ local function processData(szType, content, add_mode, add_from)
 		elseif result.type == "Xray" and info.net == "tcp" then
 			info.net = "raw"
 		end
+		if info.net == "splithttp" then info.net = "xhttp" end
 		if info.net == 'h2' or info.net == 'http' then
 			info.net = "http"
 			result.transport = (result.type == "Xray") and "xhttp" or "http"
@@ -527,7 +528,7 @@ local function processData(szType, content, add_mode, add_from)
 		if info.net == 'grpc' then
 			result.grpc_serviceName = info.path
 		end
-		if info.net == 'xhttp' or info.net == 'splithttp' then
+		if info.net == 'xhttp' then
 			result.xhttp_host = info.host
 			result.xhttp_path = info.path
 		end
@@ -593,7 +594,7 @@ local function processData(szType, content, add_mode, add_from)
 			info = info:sub(1, find_index - 1)
 		end
 
-		local hostInfo = split(base64Decode(info), "@")
+		local hostInfo = split(base64Decode(UrlDecode(info)), "@")
 		if hostInfo and #hostInfo > 0 then
 			local host_port = hostInfo[#hostInfo]
 			-- [2001:4860:4860::8888]:443
@@ -639,12 +640,9 @@ local function processData(szType, content, add_mode, add_from)
 				result.protocol = 'shadowsocks'
 			end
 
-			if result.type == "SS-Rust" and method:lower() == "chacha20-poly1305" then
-				result.method = "chacha20-ietf-poly1305"
-			end
-
-			if result.type == "Xray" and method:lower() == "chacha20-ietf-poly1305" then
-				result.method = "chacha20-poly1305"
+			if result.type ~= "Xray" then
+				result.method = (method:lower() == "chacha20-poly1305" and "chacha20-ietf-poly1305") or
+						(method:lower() == "xchacha20-poly1305" and "xchacha20-ietf-poly1305") or method
 			end
 
 			if result.plugin then
@@ -977,6 +975,7 @@ local function processData(szType, content, add_mode, add_from)
 			elseif result.type == "Xray" and params.type == "tcp" then
 				params.type = "raw"
 			end
+			if params.type == "splithttp" then params.type = "xhttp" end
 			if params.type == "h2" or params.type == "http" then
 				params.type = "http"
 				result.transport = (result.type == "Xray") and "xhttp" or "http"
@@ -1040,7 +1039,7 @@ local function processData(szType, content, add_mode, add_from)
 				if params.serviceName then result.grpc_serviceName = params.serviceName end
 				result.grpc_mode = params.mode or "gun"
 			end
-			if params.type == 'xhttp' or params.type == 'splithttp' then
+			if params.type == 'xhttp' then
 				result.xhttp_host = params.host
 				result.xhttp_path = params.path
 				result.xhttp_mode = params.mode or "auto"
@@ -1313,7 +1312,7 @@ local function truncate_nodes(add_from)
 			end
 		end
 	end)
-	uci:commit(appname)
+	api.uci_save(uci, appname, true)
 end
 
 local function select_node(nodes, config)
@@ -1465,7 +1464,7 @@ local function update_node(manual)
 			end
 		end
 	end
-	uci:commit(appname)
+	api.uci_save(uci, appname, true)
 
 	if next(CONFIG) then
 		local nodes = {}
@@ -1500,7 +1499,7 @@ local function update_node(manual)
 		end
 		]]--
 
-		uci:commit(appname)
+		api.uci_save(uci, appname, true)
 	end
 
 	if arg[3] == "cron" then
