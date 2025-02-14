@@ -352,15 +352,17 @@ get_geoip() {
 	local geoip_type_flag=""
 	local geoip_path="$(config_t_get global_rules v2ray_location_asset)"
 	geoip_path="${geoip_path%*/}/geoip.dat"
-	[ -s "$geoip_path" ] || { echo ""; return; }
+	[ -s "$geoip_path" ] || { echo ""; return 1; }
 	case "$2" in
 		"ipv4") geoip_type_flag="-ipv6=false" ;;
 		"ipv6") geoip_type_flag="-ipv4=false" ;;
 	esac
 	if type geoview &> /dev/null; then
 		geoview -input "$geoip_path" -list "$geoip_code" $geoip_type_flag -lowmem=true
+		return 0
 	else
 		echo ""
+		return 1
 	fi
 }
 
@@ -919,7 +921,7 @@ run_redir() {
 						_args="${_args} direct_dns_tcp_server=$(config_t_get global direct_dns_tcp 223.5.5.5 | sed 's/:/#/g')"
 					;;
 					dot)
-						local tmp_dot_dns=$(config_t_get global direct_dns_dot "tls://dot.pub@1.12.12.12")
+						local tmp_dot_dns=$(config_t_get global direct_dns_dot "tls://1.12.12.12")
 						local tmp_dot_ip=$(echo "$tmp_dot_dns" | sed -n 's/.*:\/\/\([^@#]*@\)*\([^@#]*\).*/\2/p')
 						local tmp_dot_port=$(echo "$tmp_dot_dns" | sed -n 's/.*#\([0-9]\+\).*/\1/p')
 						_args="${_args} direct_dns_dot_server=$tmp_dot_ip#${tmp_dot_port:-853}"
@@ -1397,7 +1399,7 @@ start_dns() {
 		;;
 		dot)
 			if [ "$chinadns_tls" != "nil" ]; then
-				local DIRECT_DNS=$(config_t_get global direct_dns_dot "tls://dot.pub@1.12.12.12")
+				local DIRECT_DNS=$(config_t_get global direct_dns_dot "tls://1.12.12.12")
 				china_ng_local_dns=${DIRECT_DNS}
 
 				#当全局（包括访问控制节点）开启chinadns-ng时，不启动新进程。
@@ -1519,7 +1521,7 @@ start_dns() {
 		TCP_PROXY_DNS=1
 		if [ "$chinadns_tls" != "nil" ]; then
 			local china_ng_listen_port=${NEXT_DNS_LISTEN_PORT}
-			local china_ng_trust_dns=$(config_t_get global remote_dns_dot "tls://dns.google@8.8.4.4")
+			local china_ng_trust_dns=$(config_t_get global remote_dns_dot "tls://1.1.1.1")
 			local tmp_dot_ip=$(echo "$china_ng_trust_dns" | sed -n 's/.*:\/\/\([^@#]*@\)*\([^@#]*\).*/\2/p')
 			local tmp_dot_port=$(echo "$china_ng_trust_dns" | sed -n 's/.*#\([0-9]\+\).*/\1/p')
 			REMOTE_DNS="$tmp_dot_ip#${tmp_dot_port:-853}"
@@ -1864,7 +1866,7 @@ acl_app() {
 										;;
 										dot)
 											if [ "$(chinadns-ng -V | grep -i wolfssl)" != "nil" ]; then
-												_chinadns_local_dns=$(config_t_get global direct_dns_dot "tls://dot.pub@1.12.12.12")
+												_chinadns_local_dns=$(config_t_get global direct_dns_dot "tls://1.12.12.12")
 											fi
 										;;
 									esac
@@ -1925,6 +1927,7 @@ acl_app() {
 								if [ -n "${type}" ] && ([ "${type}" = "sing-box" ] || [ "${type}" = "xray" ]); then
 									config_file="acl/${tcp_node}_TCP_${redir_port}.json"
 									_extra_param="socks_address=127.0.0.1 socks_port=$socks_port"
+									_extra_param="${_extra_param} tcp_proxy_way=$TCP_PROXY_WAY"
 									if [ "$dns_mode" = "sing-box" ] || [ "$dns_mode" = "xray" ]; then
 										dns_port=$(get_new_port $(expr $dns_port + 1))
 										_dns_port=$dns_port
@@ -2026,6 +2029,8 @@ start() {
 	get_config
 	export V2RAY_LOCATION_ASSET=$(config_t_get global_rules v2ray_location_asset "/usr/share/v2ray/")
 	export XRAY_LOCATION_ASSET=$V2RAY_LOCATION_ASSET
+	export ENABLE_DEPRECATED_GEOSITE=true
+	export ENABLE_DEPRECATED_GEOIP=true
 	ulimit -n 65535
 	start_haproxy
 	start_socks
