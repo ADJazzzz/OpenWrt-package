@@ -303,6 +303,36 @@ do
 					end
 				}
 			end
+		elseif node.protocol and node.protocol == '_urltest' then
+			local flag = "Sing-Box URLTest节点[" .. node_id .. "]列表"
+			local currentNodes = {}
+			local newNodes = {}
+			if node.urltest_node then
+				for k, node in pairs(node.urltest_node) do
+					currentNodes[#currentNodes + 1] = {
+						log = false,
+						node = node,
+						currentNode = node and uci:get_all(appname, node) or nil,
+						remarks = node,
+						set = function(o, server)
+							if o and server and server ~= "nil" then
+								table.insert(o.newNodes, server)
+							end
+						end
+					}
+				end
+			end
+			CONFIG[#CONFIG + 1] = {
+				remarks = flag,
+				currentNodes = currentNodes,
+				newNodes = newNodes,
+				set = function(o, newNodes)
+					if o then
+						if not newNodes then newNodes = o.newNodes end
+						uci:set_list(appname, node_id, "urltest_node", newNodes or {})
+					end
+				end
+			}
 		else
 			--前置代理节点
 			local currentNode = uci:get_all(appname, node_id) or nil
@@ -1318,13 +1348,11 @@ local function truncate_nodes(add_from)
 			end
 		end
 	end)
-	if add_from then
-		uci:foreach(appname, "subscribe_list", function(o)
-			if add_from == "all-node" or add_from == o.remark then
-				uci:delete(appname, o['.name'], "md5")
-			end
-		end)
-	end
+	uci:foreach(appname, "subscribe_list", function(o)
+		if (not add_from) or add_from == o.remark then
+			uci:delete(appname, o['.name'], "md5")
+		end
+	end)
 	api.uci_save(uci, appname, true)
 end
 
@@ -1676,18 +1704,19 @@ local execute = function()
 			local access_mode = value.access_mode
 			local result = (not access_mode) and "自动" or (access_mode == "direct" and "直连访问" or (access_mode == "proxy" and "通过代理" or "自动"))
 			log('正在订阅:【' .. remark .. '】' .. url .. ' [' .. result .. ']')
-			local raw = curl(url, "/tmp/" .. cfgid, ua, access_mode)
+			local tmp_file = "/tmp/" .. cfgid
+			local raw = curl(url, tmp_file, ua, access_mode)
 			if raw == 0 then
-				local f = io.open("/tmp/" .. cfgid, "r")
+				local f = io.open(tmp_file, "r")
 				local stdout = f:read("*all")
 				f:close()
 				raw = trim(stdout)
 				local old_md5 = value.md5 or ""
-				local new_md5 = luci.sys.exec(string.format("echo -n $(echo '%s' | md5sum | awk '{print $1}')", raw))
+				local new_md5 = luci.sys.exec("[ -f " .. tmp_file .. " ] && md5sum " .. tmp_file .. " | awk '{print $1}' || echo 0"):gsub("\n", "")
+				os.remove(tmp_file)
 				if old_md5 == new_md5 then
 					log('订阅:【' .. remark .. '】没有变化，无需更新。')
 				else
-					os.remove("/tmp/" .. cfgid)
 					parse_link(raw, "2", remark, cfgid)
 					uci:set(appname, cfgid, "md5", new_md5)
 				end

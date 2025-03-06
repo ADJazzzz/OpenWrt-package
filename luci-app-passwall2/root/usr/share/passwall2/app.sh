@@ -589,7 +589,7 @@ run_socks() {
 
 	if [ "$type" == "sing-box" ] || [ "$type" == "xray" ]; then
 		local protocol=$(config_n_get $node protocol)
-		if [ "$protocol" == "_balancing" ] || [ "$protocol" == "_shunt" ] || [ "$protocol" == "_iface" ]; then
+		if [ "$protocol" == "_balancing" ] || [ "$protocol" == "_shunt" ] || [ "$protocol" == "_iface" ] || [ "$protocol" == "_urltest" ]; then
 			unset error_msg
 		fi
 	fi
@@ -1238,6 +1238,8 @@ start() {
 	get_config
 	export V2RAY_LOCATION_ASSET=$(config_t_get global_rules v2ray_location_asset "/usr/share/v2ray/")
 	export XRAY_LOCATION_ASSET=$V2RAY_LOCATION_ASSET
+	export ENABLE_DEPRECATED_GEOSITE=true
+	export ENABLE_DEPRECATED_GEOIP=true
 	ulimit -n 65535
 	start_haproxy
 	start_socks
