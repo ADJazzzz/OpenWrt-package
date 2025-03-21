@@ -146,11 +146,8 @@ end
 if is_finded("ssr-redir") then
 	o:value("ssr", translate("ShadowsocksR"))
 end
-if is_finded("ss-local") or is_finded("ss-redir") then
-	o:value("ss", translate("Shadowsocks-libev Version"))
-end
-if is_finded("sslocal") or is_finded("ssmanager") then
-	o:value("ss", translate("Shadowsocks-rust Version"))
+if is_finded("ss-local") or is_finded("ss-redir") or is_finded("sslocal") or is_finded("ssmanager") then
+    o:value("ss", translate("Shadowsocks"))
 end
 if is_finded("trojan") then
 	o:value("trojan", translate("Trojan"))
@@ -186,6 +183,18 @@ for _, e in ipairs(luci.sys.net.devices()) do
 end
 o:depends("type", "tun")
 o.description = translate("Redirect traffic to this network interface")
+
+-- 新增一个选择框，用于选择 Shadowsocks 版本
+o = s:option(ListValue, "ss_variant", translate("Shadowsocks Variant"))
+local isSSRust = is_finded("sslocal") or is_finded("ssmanager")
+local isSSLibev = is_finded("ss-local") or is_finded("ss-redir")
+if isSSRust then
+    o:value("isSSRust", translate("Shadowsocks-rust Version"))
+end
+if isSSLibev then
+    o:value("isSSLibev", translate("Shadowsocks-libev Version"))
+end
+o:depends("type", "ss")
 
 o = s:option(ListValue, "v2ray_protocol", translate("V2Ray/XRay protocol"))
 o:value("vless", translate("VLESS"))
@@ -279,8 +288,13 @@ o.rmempty = true
 o:depends({type = "v2ray", v2ray_protocol = "shadowsocks"})
 o.default = "1"
 
+-- [[ Enable Shadowsocks Plugin ]]--
+o = s:option(Flag, "enable_plugin", translate("Enable Plugin"))
+o.rmempty = true
+o.default = "0"
+
 -- Shadowsocks Plugin
-o = s:option(Value, "plugin", translate("Obfs"))
+o = s:option(ListValue, "plugin", translate("Obfs"))
 o:value("none", translate("None"))
 if is_finded("obfs-local") then
 	o:value("obfs-local", translate("obfs-local"))
@@ -291,12 +305,17 @@ end
 if is_finded("xray-plugin") then
 	o:value("xray-plugin", translate("xray-plugin"))
 end
+o:value("custom", translate("Custom"))
 o.rmempty = true
-o:depends("type", "ss")
+o:depends({type = "ss", enable_plugin = true})
+
+o = s:option(Value, "custom_plugin", translate("Custom Plugin Path"))
+o.placeholder = "/path/to/custom-plugin"
+o:depends({plugin = "custom"})
 
 o = s:option(Value, "plugin_opts", translate("Plugin Opts"))
 o.rmempty = true
-o:depends("type", "ss")
+o:depends({type = "ss", enable_plugin = true})
 
 o = s:option(ListValue, "protocol", translate("Protocol"))
 for _, v in ipairs(protocol) do
