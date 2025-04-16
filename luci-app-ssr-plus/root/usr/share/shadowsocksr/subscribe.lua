@@ -30,7 +30,7 @@ local subscribe_url = ucic:get_first(name, 'server_subscribe', 'subscribe_url', 
 local filter_words = ucic:get_first(name, 'server_subscribe', 'filter_words', '过期时间/剩余流量')
 local save_words = ucic:get_first(name, 'server_subscribe', 'save_words', '')
 -- 读取 ss_type 设置
-local ss_type = ucic:get_first(name, 'server_subscribe', 'ss_type')
+local ss_type = ucic:get_first(name, 'server_subscribe', 'ss_type', 'ss-rust')
 -- 根据 ss_type 选择对应的程序
 local ss_program = ""
 if ss_type == "ss-rust" then
@@ -180,7 +180,8 @@ local function processData(szType, content)
 	if not isCompleteJSON(content) then
 		return nil
 	end
-	if szType == "hysteria2" then
+
+	if szType == "hysteria2" or szType == "hy2" then
 		local url = URL.parse("http://" .. content)
 		local params = url.query
 
@@ -213,8 +214,12 @@ local function processData(szType, content)
 		if params.insecure then
 			result.insecure = "1"
 			if params.sni then
-				result.pinsha256 = params.pinsha256
+				result.pinsha256 = params.pinSHA256
 			end
+		end
+		if params.mport then
+			result.flag_port_hopping = "1"
+			result.port_range = params.mport
 		end
 	elseif szType == 'ssr' then
 		local dat = split(content, "/%?")
@@ -443,37 +448,61 @@ local function processData(szType, content)
 		local params = {}
 		local idx_sp = 0
 		local alias = ""
+
+		-- 提取别名（如果存在）
 		if content:find("#") then
 			idx_sp = content:find("#")
 			alias = content:sub(idx_sp + 1, -1)
 		end
-		local info = content:sub(1, idx_sp - 1)
+		local info = content:sub(1, idx_sp > 0 and idx_sp - 1 or #content)
 		local hostInfo = split(info, "@")
+
+		-- 基础验证
+		if #hostInfo < 2 then
+			--log("Trojan节点格式错误: 缺少@符号")
+			return nil
+		end
+
 		local userinfo = hostInfo[1]
-		local password = userinfo
+		local hostPort = hostInfo[2]
 		
 		-- 分离服务器地址和端口
-		local host = split(hostInfo[2], ":")
-		local server = host[1]
-		local port = host[2]
+		local hostParts = split(hostPort, ":")
+
+		local server = hostParts[1]
+		local port = hostParts[2]
+
+		-- 验证服务器地址和端口
+		if #hostParts < 2 then
+			--log("Trojan节点格式错误: 缺少端口号")
+			return nil
+		end
 
 		result.alias = UrlDecode(alias)
 		result.type = v2_tj
 		result.v2ray_protocol = "trojan"
 		result.server = server
-		result.password = password
+		result.password = userinfo
 
+		-- 默认设置
 		-- 按照官方的建议 默认验证ssl证书
 		result.insecure = "0"
 		result.tls = "1"
 
+		-- 解析查询参数（如果存在）
 		if port:find("?") then
-			local query = split(port, "?")
-			result.server_port = query[1]
-			for _, v in pairs(split(query[2], '&')) do
+			local queryParts = split(port, "?")
+			result.server_port = queryParts[1]
+
+			-- 解析查询参数
+			for _, v in pairs(split(queryParts[2], '&')) do
 				local t = split(v, '=')
-				params[t[1]] = t[2]
+				if #t >= 2 then
+					params[t[1]] = t[2]
+				end
 			end
+
+			-- 处理参数
 			if params.alpn then
 				-- 处理 alpn 参数
 				result.xhttp_alpn = params.alpn
@@ -651,6 +680,9 @@ local function processData(szType, content)
 end
 -- wget
 local function wget(url)
+	-- 清理URL中的隐藏字符
+	url = url:gsub("%s+$", ""):gsub("^%s+", ""):gsub("%z", "")
+
 	local stdout = luci.sys.exec('wget-ssl --timeout=20 --tries=3 -q --user-agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/44.0.2403.157 Safari/537.36" --no-check-certificate -O- "' .. url .. '"')
 	return trim(stdout)
 end
@@ -761,7 +793,7 @@ local execute = function()
 						if result then
 							-- 中文做地址的 也没有人拿中文域名搞，就算中文域也有Puny Code SB 机场
 							if not result.server or not result.server_port or result.alias == "NULL" or check_filer(result) or result.server:match("[^0-9a-zA-Z%-_%.%s]") or cache[groupHash][result.hashkey] then
-								log('丢弃无效节点: ' .. result.type .. ' 节点, ' .. result.alias)
+								log('丢弃无效节点: ' .. result.alias)
 							else
 								-- log('成功解析: ' .. result.type ..' 节点, ' .. result.alias)
 								result.grouphashkey = groupHash
