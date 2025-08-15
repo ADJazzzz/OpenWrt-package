@@ -1124,6 +1124,52 @@ if is_finded("xray") then
 	o:value("", translate("disable"))
 	o:depends({type = "v2ray", tls = true})
 	o:depends({type = "v2ray", reality = true})
+
+	o = s:option(Flag, "enable_ech", translate("Enable ECH(optional)"))
+	o.rmempty = true
+	o.default = "0"
+	o:depends({type = "v2ray", tls = true})
+
+	o = s:option(TextValue, "ech_config", translate("ECH Config"))
+	o.description = translate(
+    	"<font><b>" .. translate("If it is not empty, it indicates that the Client has enabled Encrypted Client, see:") .. "</b></font>" ..
+    	" <a href='https://xtls.github.io/config/transport.html#tlsobject' target='_blank'>" ..
+    	"<font style='color:green'><b>" .. translate("Click to the page") .. "</b></font></a>")
+	o:depends("enable_ech", true)
+	o.default = ""
+	o.rows = 5
+	o.wrap = "soft"
+	o.validate = function(self, value)
+    	-- 清理空行和多余换行
+    	return (value:gsub("[\r\n]", "")):gsub("^%s*(.-)%s*$", "%1")
+	end
+
+	o = s:option(ListValue, "ech_ForceQuery", translate("ECH Query Policy"))
+	o.description = translate("Controls the policy used when performing DNS queries for ECH configuration.")
+	o.default = "none"
+	o:value("none")
+	o:value("half")
+	o:value("full")
+	o:depends("enable_ech", true)
+
+	o = s:option(Flag, "enable_mldsa65verify", translate("Enable ML-DSA-65(optional)"))
+	o.rmempty = true
+	o.default = "0"
+	o:depends({type = "v2ray", reality = true})
+
+	o = s:option(TextValue, "reality_mldsa65verify", translate("ML-DSA-65 Public key"))
+	o.description = translate(
+    	"<font><b>" .. translate("The client has not configured mldsa65Verify, but it will not perform the \"additional verification\" step and can still connect normally, see:") .. "</b></font>" ..
+    	" <a href='https://github.com/XTLS/Xray-core/pull/4915' target='_blank'>" ..
+    	"<font style='color:green'><b>" .. translate("Click to the page") .. "</b></font></a>")
+	o:depends("enable_mldsa65verify", true)
+	o.default = ""
+	o.rows = 5
+	o.wrap = "soft"
+	o.validate = function(self, value)
+    	-- 清理空行和多余换行
+    	return (value:gsub("[\r\n]", "")):gsub("^%s*(.-)%s*$", "%1")
+	end
 end
 
 o = s:option(Value, "tls_host", translate("TLS Host"))
@@ -1343,5 +1389,4 @@ if is_finded("kcptun-client") then
 end
 
 return m
-
 
