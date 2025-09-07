@@ -23,7 +23,8 @@ local function get_noise_packets()
 		local noise = (n.enabled == "1") and {
 			type = n.type,
 			packet = n.packet,
-			delay = string.find(n.delay, "-") and n.delay or tonumber(n.delay)
+			delay = string.find(n.delay, "-") and n.delay or tonumber(n.delay),
+			applyTo = n.applyTo
 		} or nil
 		table.insert(noises, noise)
 	end)
@@ -97,14 +98,11 @@ function gen_outbound(flag, node, tag, proxy_table)
 			end
 			node.stream_security = "none"
 		else
-			if node.flow == "xtls-rprx-vision" then
-			else
-				if proxy_tag then
-					node.proxySettings = {
-						tag = proxy_tag,
-						transportLayer = true
-					}
-				end
+			if proxy_tag then
+				node.proxySettings = {
+					tag = proxy_tag,
+					transportLayer = true
+				}
 			end
 		end
 
@@ -246,7 +244,7 @@ function gen_outbound(flag, node, tag, proxy_table)
 								level = 0,
 								security = (node.protocol == "vmess") and node.security or nil,
 								encryption = node.encryption or "none",
-								flow = (node.protocol == "vless" and node.tls == "1" and (node.transport == "raw" or node.transport == "tcp") and node.flow and node.flow ~= "") and node.flow or nil
+								flow = (node.protocol == "vless" and node.tls == "1" and (node.transport == "raw" or node.transport == "tcp" or node.transport == "xhttp") and node.flow and node.flow ~= "") and node.flow or nil
 
 							}
 						}
@@ -317,7 +315,7 @@ function gen_config_server(node)
 			for i = 1, #node.uuid do
 				clients[i] = {
 					id = node.uuid[i],
-					flow = ("vless" == node.protocol and "1" == node.tls and "raw" == node.transport and node.flow and node.flow ~= "") and node.flow or nil
+					flow = (node.protocol == "vless" and node.tls == "1" and (node.transport == "raw" or node.transport == "xhttp") and node.flow and node.flow ~= "") and node.flow or nil
 				}
 			end
 			settings = {
@@ -930,7 +928,7 @@ function gen_config(var)
 						return copied_outbound.tag, nil
 					end
 					--new outbound
-					if use_proxy and (_node.type ~= "Xray" or _node.flow == "xtls-rprx-vision") then
+					if use_proxy and _node.type ~= "Xray" then
 						new_port = get_new_port()
 						table.insert(inbounds, {
 							tag = "proxy_" .. rule_name,
@@ -1370,25 +1368,37 @@ function gen_config(var)
 					end
 
 					if dns_server then
+						local outboundTag, balancerTag
+						if not api.is_local_ip(dns_server.address) or value.outboundTag == "blackhole" then --dns为本地ip，不走代理
+							outboundTag = value.outboundTag
+							balancerTag  = value.balancerTag
+						else
+							outboundTag = "direct"
+							balancerTag  = nil
+						end
 						table.insert(dns.servers, dns_server)
 						table.insert(routing.rules, {
-							inboundTag = {
-								dns_server.tag
-							},
-							outboundTag = value.outboundTag or nil,
-							balancerTag = value.balancerTag or nil
+							inboundTag = { dns_server.tag },
+							outboundTag = outboundTag,
+							balancerTag = balancerTag
 						})
 					end
 				end
 			end
 		end
 
+		local _outboundTag, _balancerTag
+		if not api.is_local_ip(_remote_dns.address) or dns_outbound_tag == "blackhole" then --dns为本地ip，不走代理
+			_outboundTag = dns_outbound_tag
+			_balancerTag  = COMMON.default_balancer_tag
+		else
+			_outboundTag = "direct"
+			_balancerTag  = nil
+		end
 		table.insert(routing.rules, {
-			inboundTag = {
-				"dns-global"
-			},
-			balancerTag = COMMON.default_balancer_tag,
-			outboundTag = dns_outbound_tag
+			inboundTag = { "dns-global" },
+			balancerTag = _balancerTag,
+			outboundTag = _outboundTag
 		})
 
 		local default_rule_index = nil
@@ -1460,7 +1470,8 @@ function gen_config(var)
 					fragment = (xray_settings.fragment == "1") and {
 						packets = (xray_settings.fragment_packets and xray_settings.fragment_packets ~= "") and xray_settings.fragment_packets,
 						length = (xray_settings.fragment_length and xray_settings.fragment_length ~= "") and xray_settings.fragment_length,
-						interval = (xray_settings.fragment_interval and xray_settings.fragment_interval ~= "") and xray_settings.fragment_interval
+						interval = (xray_settings.fragment_interval and xray_settings.fragment_interval ~= "") and xray_settings.fragment_interval,
+						maxSplit = (xray_settings.fragment_maxSplit and xray_settings.fragment_maxSplit ~= "") and xray_settings.fragment_maxSplit
 					} or nil,
 					noises = (xray_settings.noise == "1") and get_noise_packets() or nil
 				},
