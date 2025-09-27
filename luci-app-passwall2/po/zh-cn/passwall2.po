@@ -1285,9 +1285,6 @@ msgstr "<br />none：默认值，不进行伪装，发送的数据是没有特�
 msgid "Use it together with the DNS disguised type. You can fill in any domain."
 msgstr "配合伪装类型 DNS 使用，可随便填一个域名。"
 
-msgid "A legal file path. This file must not exist before running."
-msgstr "一个合法的文件路径。在运行之前，这个文件必须不存在。"
-
 msgid "Auth"
 msgstr "身份认证"
 
@@ -1836,3 +1833,6 @@ msgstr "客户端版本"
 
 msgid "Random version will be used if empty."
 msgstr "如留空，则使用随机版本。"
+
+msgid "The configured type also applies to the core specified when manually importing nodes."
+msgstr "配置的类型同样适用于手动导入节点时所指定的核心程序。"
