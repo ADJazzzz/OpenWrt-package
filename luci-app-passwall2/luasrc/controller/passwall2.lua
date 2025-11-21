@@ -85,6 +85,7 @@ function index()
 	entry({"admin", "services", appname, "subscribe_del_all"}, call("subscribe_del_all")).leaf = true
 	entry({"admin", "services", appname, "subscribe_manual"}, call("subscribe_manual")).leaf = true
 	entry({"admin", "services", appname, "subscribe_manual_all"}, call("subscribe_manual_all")).leaf = true
+	entry({"admin", "services", appname, "flush_set"}, call("flush_set")).leaf = true
 
 	--[[Components update]]
 	entry({"admin", "services", appname, "check_passwall2"}, call("app_check")).leaf = true
@@ -129,14 +130,15 @@ function hide_menu()
 end
 
 function link_add_node()
-	-- 分片接收以突破uhttpd的限制
+	-- Fragmented reception to overcome uhttpd limitations
 	local tmp_file = "/tmp/links.conf"
 	local chunk = http.formvalue("chunk")
 	local chunk_index = tonumber(http.formvalue("chunk_index"))
 	local total_chunks = tonumber(http.formvalue("total_chunks"))
+	local group = http.formvalue("group") or "default"
 
 	if chunk and chunk_index ~= nil and total_chunks ~= nil then
-		-- 按顺序拼接到文件
+		-- Assemble the files in order
 		local mode = "a"
 		if chunk_index == 0 then
 			mode = "w"
@@ -146,9 +148,9 @@ function link_add_node()
 			f:write(chunk)
 			f:close()
 		end
-		-- 如果是最后一片，才执行
+		-- If it's the last piece, then it will be executed.
 		if chunk_index + 1 == total_chunks then
-			luci.sys.call("lua /usr/share/passwall2/subscribe.lua add log")
+			luci.sys.call("lua /usr/share/passwall2/subscribe.lua add " .. group)
 		end
 	end
 end
@@ -255,7 +257,8 @@ function index_status()
 end
 
 function haproxy_status()
-	local e = luci.sys.call(string.format("/bin/busybox top -bn1 | grep -v grep | grep '%s/bin/' | grep haproxy >/dev/null", appname)) == 0
+	local e = {}
+	e["status"] = luci.sys.call(string.format("/bin/busybox top -bn1 | grep -v grep | grep '%s/bin/' | grep haproxy >/dev/null", appname)) == 0
 	http_write_json(e)
 end
 
@@ -333,6 +336,11 @@ function add_node()
 
 	local uuid = api.gen_short_uuid()
 	uci:section(appname, "nodes", uuid)
+
+	local group = http.formvalue("group")
+	if group then
+		uci:set(appname, uuid, "group", group)
+	end
 
 	if redirect == "1" then
 		api.uci_save(uci, appname)
@@ -623,7 +631,7 @@ function restore_backup()
 		fp:close()
 		if chunk_index + 1 == total_chunks then
 			api.sys.call("echo '' > /tmp/log/passwall2.log")
-			api.log(" * PassWall2 配置文件上传成功…")
+			api.log(string.format(" * PassWall2 %s", i18n.translate("Configuration file uploaded successfully…")))
 			local temp_dir = '/tmp/passwall2_bak'
 			api.sys.call("mkdir -p " .. temp_dir)
 			if api.sys.call("tar -xzf " .. file_path .. " -C " .. temp_dir) == 0 then
@@ -633,13 +641,13 @@ function restore_backup()
 						api.sys.call("cp -f " .. temp_file .. " " .. backup_file)
 					end
 				end
-				api.log(" * PassWall2 配置还原成功…")
-				api.log(" * 重启 PassWall2 服务中…\n")
+				api.log(string.format(" * PassWall2 %s", i18n.translate("Configuration restored successfully…")))
+				api.log(string.format(" * PassWall2 %s", i18n.translate("Service restarting…")))
 				luci.sys.call('/etc/init.d/passwall2 restart > /dev/null 2>&1 &')
 				luci.sys.call('/etc/init.d/passwall2_server restart > /dev/null 2>&1 &')
 				result = { status = "success", message = "Upload completed", path = file_path }
 			else
-				api.log(" * PassWall2 配置文件解压失败，请重试！")
+				api.log(string.format(" * PassWall2 %s", i18n.translate("Configuration file decompression failed, please try again!")))
 				result = { status = "error", message = "Decompression failed" }
 			end
 			api.sys.call("rm -rf " .. temp_dir)
@@ -745,7 +753,7 @@ function subscribe_manual_all()
 	end
 	local section_list = util.split(sections, ",")
 	local url_list = util.split(urls, ",")
-	-- 检查是否存在未保存配置
+	-- Check if there are any unsaved configurations.
 	for i, section in ipairs(section_list) do
 		local uci_url = api.sh_uci_get(appname, section, "url")
 		if not uci_url or uci_url == "" then
@@ -753,7 +761,7 @@ function subscribe_manual_all()
 			return
 		end
 	end
-	-- 保存有变动的url
+	-- Save URLs that have changed.
 	for i, section in ipairs(section_list) do
 		local current_url = url_list[i] or ""
 		local uci_url = api.sh_uci_get(appname, section, "url")
@@ -763,4 +771,18 @@ function subscribe_manual_all()
 	end
 	luci.sys.call("lua /usr/share/" .. appname .. "/subscribe.lua start all manual >/dev/null 2>&1 &")
 	http_write_json({ success = true, msg = "Subscribe triggered." })
+end
+
+function flush_set()
+	local redirect = http.formvalue("redirect") or "0"
+	local reload = http.formvalue("reload") or "0"
+	if reload == "1" then
+		uci:set(appname, '@global[0]', "flush_set", "1")
+		api.uci_save(uci, appname, true, true)
+	else
+		api.sh_uci_set(appname, "@global[0]", "flush_set", "1", true)
+	end
+	if redirect == "1" then
+		http.redirect(api.url("log"))
+	end
 end
