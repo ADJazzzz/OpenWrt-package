@@ -88,6 +88,7 @@ function index()
 	entry({"admin", "services", appname, "subscribe_del_all"}, call("subscribe_del_all")).leaf = true
 	entry({"admin", "services", appname, "subscribe_manual"}, call("subscribe_manual")).leaf = true
 	entry({"admin", "services", appname, "subscribe_manual_all"}, call("subscribe_manual_all")).leaf = true
+	entry({"admin", "services", appname, "flush_set"}, call("flush_set")).leaf = true
 
 	--[[rule_list]]
 	entry({"admin", "services", appname, "read_rulelist"}, call("read_rulelist")).leaf = true
@@ -300,7 +301,8 @@ function index_status()
 end
 
 function haproxy_status()
-	local e = luci.sys.call(string.format("/bin/busybox top -bn1 | grep -v grep | grep '%s/bin/' | grep haproxy >/dev/null", appname)) == 0
+	local e = {}
+	e["status"] = luci.sys.call(string.format("/bin/busybox top -bn1 | grep -v grep | grep '%s/bin/' | grep haproxy >/dev/null", appname)) == 0
 	http_write_json(e)
 end
 
@@ -406,6 +408,11 @@ function add_node()
 	local uuid = api.gen_short_uuid()
 	uci:section(appname, "nodes", uuid)
 
+	local group = http.formvalue("group")
+	if group and group ~= "default" then
+		uci:set(appname, uuid, "group", group)
+	end
+
 	if redirect == "1" then
 		api.uci_save(uci, appname)
 		http.redirect(api.url("node_config", uuid))
@@ -419,6 +426,20 @@ function set_node()
 	local protocol = http.formvalue("protocol")
 	local section = http.formvalue("section")
 	uci:set(appname, "@global[0]", protocol .. "_node", section)
+	if protocol == "tcp" then
+		local node_protocol = uci:get(appname, section, "protocol")
+		if node_protocol == "_shunt" then
+			local type = uci:get(appname, section, "type")
+			local dns_shunt = uci:get(appname, "@global[0]", "dns_shunt")
+			local dns_key = (dns_shunt == "smartdns") and "smartdns_dns_mode" or "dns_mode"
+			local dns_mode = uci:get(appname, "@global[0]", dns_key)
+			local new_dns_mode = (type == "Xray") and "xray" or "sing-box"
+			if dns_mode ~= new_dns_mode then
+				uci:set(appname, "@global[0]", dns_key, new_dns_mode)
+				uci:set(appname, "@global[0]", "v2ray_dns_mode", "tcp")
+			end
+		end
+	end
 	api.uci_save(uci, appname, true, true)
 	http.redirect(api.url("log"))
 end
@@ -574,7 +595,7 @@ end
 function get_node()
 	local id = http.formvalue("id")
 	local result = {}
-	local show_node_info = api.uci_get_type("@global_other[0]", "show_node_info", "0")
+	local show_node_info = api.uci_get_type("global_other", "show_node_info", "0")
 
 	function add_is_ipv6_key(o)
 		if o and o.address and show_node_info == "1" then
@@ -867,4 +888,18 @@ function subscribe_manual_all()
 	end
 	luci.sys.call("lua /usr/share/" .. appname .. "/subscribe.lua start all manual >/dev/null 2>&1 &")
 	http_write_json({ success = true, msg = "Subscribe triggered." })
+end
+
+function flush_set()
+	local redirect = http.formvalue("redirect") or "0"
+	local reload = http.formvalue("reload") or "0"
+	if reload == "1" then
+		uci:set(appname, '@global[0]', "flush_set", "1")
+		api.uci_save(uci, appname, true, true)
+	else
+		api.sh_uci_set(appname, "@global[0]", "flush_set", "1", true)
+	end
+	if redirect == "1" then
+		http.redirect(api.url("log"))
+	end
 end
