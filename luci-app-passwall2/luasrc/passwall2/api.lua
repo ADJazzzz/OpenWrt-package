@@ -9,7 +9,6 @@ util = require "luci.util"
 datatypes = require "luci.cbi.datatypes"
 jsonc = require "luci.jsonc"
 i18n = require "luci.i18n"
-conf = require "luci.config"
 
 curl_args = { "-skfL", "--connect-timeout 3", "--retry 3" }
 command_timeout = 300
@@ -21,7 +20,9 @@ CACHE_PATH = "/tmp/etc/passwall2_tmp"
 TMP_PATH = "/tmp/etc/" .. appname
 TMP_IFACE_PATH = TMP_PATH .. "/iface"
 
-local lang = conf.main.lang or "auto"
+NEW_PORT = nil
+
+local lang = uci:get("luci", "main", "lang") or "auto"
 if lang == "auto" then
 	local auto_lang = uci:get(appname, "@global[0]", "auto_lang")
 	if auto_lang then lang = auto_lang end
@@ -108,12 +109,23 @@ function sh_uci_commit(config)
 end
 
 function set_cache_var(key, val)
-	sys.call(string.format('/usr/share/passwall2/app.sh set_cache_var %s "%s"', key, val))
+	sys.call(string.format('. /usr/share/passwall2/utils.sh ; set_cache_var %s "%s"', key, val))
 end
+
 function get_cache_var(key)
-	local val = sys.exec(string.format('echo -n $(/usr/share/passwall2/app.sh get_cache_var %s)', key))
+	local val = sys.exec(string.format('. /usr/share/passwall2/utils.sh ; echo -n $(get_cache_var %s)', key))
 	if val == "" then val = nil end
 	return val
+end
+
+function get_new_port()
+	local cmd_format = ". /usr/share/passwall2/utils.sh ; echo -n $(get_new_port %s tcp,udp)"
+	local set_port = 0
+	if NEW_PORT and tonumber(NEW_PORT) then
+		set_port = tonumber(NEW_PORT) + 1
+	end
+	NEW_PORT = tonumber(sys.exec(string.format(cmd_format, set_port == 0 and "auto" or set_port)))
+	return NEW_PORT
 end
 
 function exec_call(cmd)
@@ -454,9 +466,9 @@ function get_node_name(node_id)
 	if e then
 		if e.type and e.remarks then
 			if e.protocol and (e.protocol == "_balancing" or e.protocol == "_shunt" or e.protocol == "_iface") then
-				local type = e.type
-				if type == "sing-box" then type = "Sing-Box" end
-				local remark = "%s：[%s] " % {type .. " " .. i18n.translatef(e.protocol), e.remarks}
+				local type_name = e.type
+				if e.type == "sing-box" then type_name = "Sing-Box" end
+				local remark = "%s：[%s] " % {type_name .. " " .. i18n.translatef(e.protocol), e.remarks}
 				return remark
 			end
 		end
@@ -472,10 +484,10 @@ function get_valid_nodes()
 	uci:foreach(appname, "nodes", function(e)
 		e.id = e[".name"]
 		if e.type and e.remarks then
+			local type_name = e.type
+			if e.type == "sing-box" then type_name = "Sing-Box" end
 			if e.protocol and (e.protocol == "_balancing" or e.protocol == "_shunt" or e.protocol == "_iface" or e.protocol == "_urltest") then
-				local type = e.type
-				if type == "sing-box" then type = "Sing-Box" end
-				e["remark"] = "%s：[%s] " % {type .. " " .. i18n.translatef(e.protocol), e.remarks}
+				e["remark"] = trim("%s：[%s]" % {type_name .. " " .. i18n.translatef(e.protocol), e.remarks})
 				e["node_type"] = "special"
 				if not e.group or e.group == "" then
 					default_nodes[#default_nodes + 1] = e
@@ -487,8 +499,7 @@ function get_valid_nodes()
 			if port and e.address then
 				local address = e.address
 				if is_ip(address) or datatypes.hostname(address) then
-					local type = e.type
-					if (type == "sing-box" or type == "Xray") and e.protocol then
+					if (e.type == "sing-box" or e.type == "Xray") and e.protocol then
 						local protocol = e.protocol
 						if protocol == "vmess" then
 							protocol = "VMess"
@@ -511,14 +522,13 @@ function get_valid_nodes()
 						else
 							protocol = protocol:gsub("^%l",string.upper)
 						end
-						if type == "sing-box" then type = "Sing-Box" end
-						type = type .. " " .. protocol
+						type_name = type_name .. " " .. protocol
 					end
 					if is_ipv6(address) then address = get_ipv6_full(address) end
-					e["remark"] = "%s：[%s]" % {type, e.remarks}
+					e["remark"] = trim("%s：[%s]" % {type_name, e.remarks})
 					if show_node_info == "1" then
 						port = port:gsub(":", "-")
-						e["remark"] = "%s：[%s] %s:%s" % {type, e.remarks, address, port}
+						e["remark"] = trim("%s：[%s] %s:%s" % {type_name, e.remarks, address, port})
 					end
 					e.node_type = "normal"
 					if not e.group or e.group == "" then
@@ -538,10 +548,11 @@ end
 function get_node_remarks(n)
 	local remarks = ""
 	if n then
+		local type_name = n.type
+		if n.type == "sing-box" then type_name = "Sing-Box" end
 		if n.protocol and (n.protocol == "_balancing" or n.protocol == "_shunt" or n.protocol == "_iface" or n.protocol == "_urltest") then
-			remarks = "%s：[%s] " % {n.type .. " " .. i18n.translatef(n.protocol), n.remarks}
+			remarks = trim("%s：[%s]" % {type_name .. " " .. i18n.translatef(n.protocol), n.remarks})
 		else
-			local type2 = n.type
 			if (n.type == "sing-box" or n.type == "Xray") and n.protocol then
 				local protocol = n.protocol
 				if protocol == "vmess" then
@@ -565,10 +576,9 @@ function get_node_remarks(n)
 				else
 					protocol = protocol:gsub("^%l",string.upper)
 				end
-				if type2 == "sing-box" then type2 = "Sing-Box" end
-				type2 = type2 .. " " .. protocol
+				type_name = type_name .. " " .. protocol
 			end
-			remarks = "%s：[%s]" % {type2, n.remarks}
+			remarks = trim("%s：[%s]" % {type_name, n.remarks})	
 		end
 	end
 	return remarks
@@ -1178,11 +1188,11 @@ function get_version()
 	if not version or #version == 0 then
 		version = sys.exec("apk list luci-app-passwall2 2>/dev/null | awk '/installed/ {print $1}' | cut -d'-' -f4-")
 	end
-	return (version or ""):gsub("\n", "")
+	return (version or ""):gsub("\n", ""):match("^([^-]+)")
 end
 
 function to_check_self()
-	local url = "https://raw.githubusercontent.com/xiaorouji/openwrt-passwall2/main/luci-app-passwall2/Makefile"
+	local url = "https://raw.githubusercontent.com/Openwrt-Passwall/openwrt-passwall2/main/luci-app-passwall2/Makefile"
 	local tmp_file = "/tmp/passwall2_makefile"
 	local return_code, result = curl_auto(url, tmp_file, curl_args)
 	result = return_code == 0
@@ -1246,18 +1256,18 @@ function set_apply_on_parse(map)
 	if not map then
 		return
 	end
-	local lang = conf.main.lang or "auto"
+	local lang = uci:get("luci", "main", "lang") or "auto"
 	if lang == "auto" then
 		local http = require "luci.http"
 		local aclang = http.getenv("HTTP_ACCEPT_LANGUAGE") or ""
 		for lpat in aclang:gmatch("[%w-]+") do
 			lpat = lpat and lpat:gsub("-", "_")
-			if conf.languages[lpat] then
+			if uci:get("luci", "languages", lpat) then
 				lang = lpat
 				break
 			end
 			lpat = lpat and lpat:lower()
-			if conf.languages[lpat] then
+			if uci:get("luci", "languages", lpat) then
 				lang = lpat
 				break
 			end
@@ -1277,14 +1287,15 @@ function set_apply_on_parse(map)
 				end
 			end
 		else
+			apply_redirect(map)
+			local old = map.on_after_save
 			map.on_after_save = function(self)
+				if old then old(self) end
 				map:set("@global[0]", "timestamp", os.time())
 			end
+			local cbi = require "luci.cbi"
+			map:append(cbi.Template(appname .. "/cbi/optimize_cbi_ui"))
 		end
-	end
-	map.render = function(self, ...)
-		getmetatable(self).__index.render(self, ...) -- Maintain the original rendering process
-		optimize_cbi_ui()
 	end
 end
 
@@ -1390,26 +1401,29 @@ function format_go_time(input)
 	return result
 end
 
-function optimize_cbi_ui()
-	luci.http.write([[
-		<script type="text/javascript">
-			//Correct the names of the move up and move down buttons.
-			document.querySelectorAll("input.btn.cbi-button.cbi-button-up").forEach(function(btn) {
-				btn.value = "]] .. i18n.translate("Move up") .. [[";
-			});
-			document.querySelectorAll("input.btn.cbi-button.cbi-button-down").forEach(function(btn) {
-				btn.value = "]] .. i18n.translate("Move down") .. [[";
-			});
-			//Remove extra line breaks between controls and descriptions.
-			document.querySelectorAll("div.cbi-value-description").forEach(function(descDiv) {
-				var prev = descDiv.previousSibling;
-				while (prev && prev.nodeType === Node.TEXT_NODE && prev.textContent.trim() === "") {
-					prev = prev.previousSibling;
-				}
-				if (prev && prev.nodeType === Node.ELEMENT_NODE && prev.tagName === "BR") {
-					prev.remove();
-				}
-			});
-		</script>
-	]])
+function apply_redirect(m)
+	local tmp_uci_file = "/etc/config/" .. appname .. "_redirect"
+	if m.redirect and m.redirect ~= "" then
+		if fs.access(tmp_uci_file) then
+			local redirect
+			for line in io.lines(tmp_uci_file) do
+				redirect = line:match("option%s+url%s+['\"]([^'\"]+)['\"]")
+				if redirect and redirect ~= "" then break end
+			end
+			if redirect and redirect ~= "" then
+				sys.call("/bin/rm -f " .. tmp_uci_file)
+				luci.http.redirect(redirect)
+			end
+		else
+			fs.writefile(tmp_uci_file, "config redirect\n")
+		end
+		m.on_after_save = function(self)
+			local redirect = self.redirect
+			if redirect and redirect ~= "" then
+				uci:set(appname .. "_redirect", "@redirect[0]", "url", redirect)
+			end
+		end
+	else
+		sys.call("/bin/rm -f " .. tmp_uci_file)
+	end
 end
