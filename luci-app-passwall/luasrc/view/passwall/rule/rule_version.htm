@@ -1,9 +1,17 @@
 <%
 local api = require "luci.passwall.api"
+local fs = api.fs
+local has_old_geoip = fs.access("/tmp/bak_v2ray/geoip.dat")
+local has_old_geosite = fs.access("/tmp/bak_v2ray/geosite.dat")
 -%>
 <script src="<%=resource%>/view/<%=api.appname%>/Sortable.min.js?v=26.1.9"></script>
 
 <style>
+	table .cbi-button-up,
+	table .cbi-button-down {
+		display: none !important;
+	}
+
 	div.cbi-value[id$="-gfwlist_update"],
 	div.cbi-value[id$="-chnroute_update"],
 	div.cbi-value[id$="-chnroute6_update"],
@@ -14,6 +22,7 @@ local api = require "luci.passwall.api"
 	}
 
 	.drag-handle {
+		vertical-align: middle;
 		cursor: grab !important;
 		display: inline-flex;
 		align-items: center;
@@ -23,8 +32,12 @@ local api = require "luci.passwall.api"
 		padding: 0 !important;
 		line-height: inherit;
 		user-select: none;
-		color: #00000070;
 		align-self: stretch;
+		background-color: transparent;
+	}
+
+	.drag-handle:hover {
+		background: transparent;
 	}
 
 	.dragging-row {
@@ -63,7 +76,14 @@ local api = require "luci.passwall.api"
 				<input class="cbi-input-checkbox" type="checkbox" name="geosite" value="1" />
 				geosite
 			</label>
-			<br><br><input class="btn cbi-button cbi-button-apply" type="button" id="update_rules_btn" onclick="update_rules(this)" value="<%:Manually update%>" />
+			<br><br>
+			<input class="btn cbi-button cbi-button-apply" type="button" id="update_rules_btn" onclick="update_rules(this)" value="<%:Manually update%>" />
+			<% if has_old_geoip then %>
+			<input class="btn cbi-button cbi-button-reset" type="button" onclick="rollback_rules(this, 'geoip')" value="<%:Rollback%> GeoIP" />
+			<% end %>
+			<% if has_old_geosite then %>
+			<input class="btn cbi-button cbi-button-reset" type="button" onclick="rollback_rules(this, 'geosite')" value="<%:Rollback%> Geosite" />
+			<% end %>
 		</div>
 	</div>
 </div>
@@ -118,8 +138,8 @@ local api = require "luci.passwall.api"
 		var len = domList.length;
 		while(len--) {
 			var dom = domList[len];　　
-			if(dom.type == 'checkbox' && dom.checked) {　　
-				checkBoxList.push(dom.name);　　
+			if(dom.type == 'checkbox' && dom.checked) {
+				checkBoxList.push(dom.name);
 			}
 		}
 		XHR.get('<%=api.url("update_rules")%>', {
@@ -137,25 +157,62 @@ local api = require "luci.passwall.api"
 		);
 	}
 
+	function rollback_rules(btn, type) {
+		let ori_val = btn.value;
+		btn.disabled = true;
+		btn.value = '<%:Rollbacking...%>';
+		var div = document.getElementById('_rule_div');
+		var domList = div.getElementsByTagName('input');
+		var checkBoxList = [];
+		var len = domList.length;
+		while(len--) {
+			var dom = domList[len];　　
+			if(dom.type == 'checkbox' && dom.checked) {
+				if(type == 'geoip' && (dom.name === 'chnroute' || dom.name === 'chnroute6')) {
+					checkBoxList.push(dom.name);
+				}
+				if(type == 'geosite' && (dom.name === 'gfwlist' || dom.name === 'chnlist')) {
+					checkBoxList.push(dom.name);
+				}
+			}
+		}
+		XHR.get('<%=api.url("rollback_rules")%>', {
+			type: type,
+			rules: checkBoxList.join(",")
+			},
+			function(x, data) {
+				if(x && x.status == 200 && data.code == 1) {
+					alert("<%:Success%>");
+					btn.style.display = "none";
+				} else {
+					alert("<%:Error%>");
+					btn.disabled = false;
+					btn.value = ori_val;
+				}
+			}
+		);
+	}
+
 	//分流规则添加拖拽排序
-	(function () {
+	document.addEventListener("DOMContentLoaded", function () {
 		function initSortableForTable() {
 			var section = document.getElementById("cbi-<%=api.appname%>-shunt_rules");
 			if (!section) return;
 
+			hideSortColumn(section);
+
 			// === 插入 drag handle ===
-			var delBtns = section.getElementsByClassName("cbi-button-remove");
-			for (var i = 0; i < delBtns.length; i++) {
-				var btn = delBtns[i];
-				var parent = btn && btn.parentNode;
-				if (!parent || parent.getElementsByClassName("drag-handle").length)
-					continue;
+			var rows = section.querySelectorAll("tr");
+			rows.forEach(function(row) {
+				var btn = row.querySelector(".cbi-button-remove:last-of-type");
+				if (!btn) return;
+				if (btn.nextElementSibling && btn.nextElementSibling.classList.contains("drag-handle")) return;
 				var handle = document.createElement("span");
 				handle.className = "drag-handle center";
 				handle.title = "<%:Drag to reorder%>";
 				handle.innerHTML = "⠿";
-				parent.insertBefore(handle, btn.nextSibling);
-			}
+				btn.after(handle);
+			});
 
 			// === 初始化 Sortable ===
 			var table = section.getElementsByTagName("table")[0];
@@ -209,6 +266,28 @@ local api = require "luci.passwall.api"
 				hiddenInput.value = changed ? newOrder.join(" ") : "";
 			}
 		}
+		
+		// 隐藏18.06 up/down 列
+		function hideSortColumn(section) {
+			var table = section.getElementsByTagName("table")[0];
+			if(!table) return;
+			var rows = table.querySelectorAll("tr.cbi-section-table-row");
+			if(!rows.length) return;
+			var colCount = rows[0].children.length, sortCol = -1;
+			for(var col=0; col<colCount; col++){
+				var hasSort=false, invalid=false;
+				rows.forEach(function(tr){
+					var td=tr.children[col]; if(!td) return;
+					if(td.querySelector(".cbi-button-edit, .cbi-button-remove")) invalid=true;
+					if(td.querySelector(".cbi-button-up, .cbi-button-down")) hasSort=true;
+				});
+				if(!invalid && hasSort){ sortCol=col; break; }
+			}
+			if(sortCol===-1) return;
+			table.querySelectorAll("tr").forEach(function(tr){
+				var c=tr.children[sortCol]; if(c) c.style.display="none";
+			});
+		}
 
 		// === 等待 TypedSection 行稳定 ===
 		(function waitStable() {
@@ -221,12 +300,12 @@ local api = require "luci.passwall.api"
 
 				last = count;
 				if (stable >= THRESHOLD)
-					initSortableForTable();
+					setTimeout(initSortableForTable, 200);
 				else
 					requestAnimationFrame(tick);
 			}
 			tick();
 		})();
-	})();
+	});
 	//]]>
 </script>
