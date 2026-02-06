@@ -3,14 +3,14 @@
 DIR="$(cd "$(dirname "$0")" && pwd)"
 MY_PATH=$DIR/iptables.sh
 IPSET_LOCAL="passwall2_local"
+IPSET_WAN="passwall2_wan"
 IPSET_LAN="passwall2_lan"
 IPSET_VPS="passwall2_vps"
 
 IPSET_LOCAL6="passwall2_local6"
+IPSET_WAN6="passwall2_wan6"
 IPSET_LAN6="passwall2_lan6"
 IPSET_VPS6="passwall2_vps6"
-
-FORCE_INDEX=2
 
 . /lib/functions/network.sh
 
@@ -200,35 +200,37 @@ gen_lanlist_6() {
 	EOF
 }
 
-get_wan_ip() {
-	local NET_IF
+get_wan_ips() {
+	local family="$1"
 	local NET_ADDR
-	
-	network_flush_cache
-	network_find_wan NET_IF
-	network_get_ipaddr NET_ADDR "${NET_IF}"
-	
-	echo $NET_ADDR
-}
+	local iface
+	local INTERFACES=$(ubus call network.interface dump | jsonfilter -e '@.interface[@.route[0]].interface')
+	for iface in $INTERFACES; do
+		local addr
+		if [ "$family" = "ip6" ]; then
+			network_get_ipaddr6 addr "$iface"
+			case "$addr" in
+				""|fe80*) continue ;;
+			esac
+		else
+			network_get_ipaddr addr "$iface"
+			case "$addr" in
+				""|"0.0.0.0") continue ;;
+			esac
+		fi
 
-get_wan6_ip() {
-	local NET_IF
-	local NET_ADDR
-	
-	network_flush_cache
-	network_find_wan6 NET_IF
-	network_get_ipaddr6 NET_ADDR "${NET_IF}"
-	
-	echo $NET_ADDR
+		case " $NET_ADDR " in
+			*" $addr "*) ;;
+			*) NET_ADDR="${NET_ADDR:+$NET_ADDR }$addr" ;;
+		esac
+	done
+	echo "$NET_ADDR"
 }
 
 gen_shunt_list() {
 	local node=${1}
 	local shunt_list4_var_name=${2}
 	local shunt_list6_var_name=${3}
-	local _write_ipset_direct=${4}
-	local _set_name4=${5}
-	local _set_name6=${6}
 	[ -z "$node" ] && continue
 	unset ${shunt_list4_var_name}
 	unset ${shunt_list6_var_name}
@@ -237,10 +239,10 @@ gen_shunt_list() {
 	NODE_PROTOCOL=$(config_n_get $node protocol)
 	[ "$NODE_PROTOCOL" = "_shunt" ] && USE_SHUNT_NODE=1
 	[ "$USE_SHUNT_NODE" = "1" ] && {
-		local enable_geoview=$(config_t_get global_rules enable_geoview 0)
-		[ -z "$(first_type geoview)" ] && enable_geoview=0
+		local enable_geoview_ip=$(config_n_get $node enable_geoview_ip 0)
+		[ -z "$(first_type geoview)" ] && enable_geoview_ip=0
 		local preloading=0
-		preloading=$enable_geoview
+		preloading=$enable_geoview_ip
 		[ "${preloading}" = "1" ] && {
 			local default_node=$(config_n_get ${node} default_node _direct)
 			local default_outbound="redirect"
@@ -261,25 +263,26 @@ gen_shunt_list() {
 
 					config_n_get $shunt_id ip_list | tr -s "\r\n" "\n" | sed -e "/^$/d" | grep -E "(\.((2(5[0-5]|[0-4][0-9]))|[0-1]?[0-9]{1,2})){3}" | sed -e "s/^/add $ipset_v4 &/g" | awk '{print $0} END{print "COMMIT"}' | ipset -! -R
 					config_n_get $shunt_id ip_list | tr -s "\r\n" "\n" | sed -e "/^$/d" | grep -E "([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4}" | sed -e "s/^/add $ipset_v6 &/g" | awk '{print $0} END{print "COMMIT"}' | ipset -! -R
-					[ "${enable_geoview}" = "1" ] && {
+					[ "${enable_geoview_ip}" = "1" ] && {
 						local _geoip_code=$(config_n_get $shunt_id ip_list | tr -s "\r\n" "\n" | sed -e "/^$/d" | grep -E "^geoip:" | grep -v "^geoip:private" | sed -E 's/^geoip:(.*)/\1/' | sed ':a;N;$!ba;s/\n/,/g')
 						[ -n "$_geoip_code" ] && {
-							if [ "$(config_n_get $node type)" = "sing-box" ]; then
-								get_singbox_geoip $_geoip_code ipv4 | grep -E "(\.((2(5[0-5]|[0-4][0-9]))|[0-1]?[0-9]{1,2})){3}" | sed -e "s/^/add $ipset_v4 &/g" | awk '{print $0} END{print "COMMIT"}' | ipset -! -R
-								get_singbox_geoip $_geoip_code ipv6 | grep -E "([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4}" | sed -e "s/^/add $ipset_v6 &/g" | awk '{print $0} END{print "COMMIT"}' | ipset -! -R
-							else
-								get_geoip $_geoip_code ipv4 | grep -E "(\.((2(5[0-5]|[0-4][0-9]))|[0-1]?[0-9]{1,2})){3}" | sed -e "s/^/add $ipset_v4 &/g" | awk '{print $0} END{print "COMMIT"}' | ipset -! -R
-								get_geoip $_geoip_code ipv6 | grep -E "([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4}" | sed -e "s/^/add $ipset_v6 &/g" | awk '{print $0} END{print "COMMIT"}' | ipset -! -R
-							fi
+							get_geoip $_geoip_code ipv4 | grep -E "(\.((2(5[0-5]|[0-4][0-9]))|[0-1]?[0-9]{1,2})){3}" | sed -e "s/^/add $ipset_v4 &/g" | awk '{print $0} END{print "COMMIT"}' | ipset -! -R
+							get_geoip $_geoip_code ipv6 | grep -E "([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4}" | sed -e "s/^/add $ipset_v6 &/g" | awk '{print $0} END{print "COMMIT"}' | ipset -! -R
 							log 1 "$(i18n "parse the traffic splitting rules[%s]-[geoip:%s] add to %s to complete." "${shunt_id}" "${_geoip_code}" "IPSET")"
 						}
 					}
 				}
 			done
 		}
-		[ "${_write_ipset_direct}" = "1" ] && {
-			_SHUNT_LIST4="${_SHUNT_LIST4} ${_set_name4}:direct"
-			_SHUNT_LIST6="${_SHUNT_LIST6} ${_set_name6}:direct"
+		local direct_ipset4=$(get_cache_var "node_${node}_direct_ipset4")
+		[ -n "${direct_ipset4}" ] && {
+			ipset -! create ${direct_ipset4} nethash maxelem 1048576 timeout 259200
+			_SHUNT_LIST4="${_SHUNT_LIST4} ${direct_ipset4}:direct"
+		}
+		local direct_ipset6=$(get_cache_var "node_${node}_direct_ipset6")
+		[ -n "${direct_ipset6}" ] && {
+			ipset -! create ${direct_ipset6} nethash family inet6 maxelem 1048576 timeout 259200
+			_SHUNT_LIST6="${_SHUNT_LIST6} ${direct_ipset6}:direct"
 		}
 		[ "${preloading}" = "1" ] && [ -n "$default_node" ] && {
 			local ipset_v4="passwall2_${node}_default"
@@ -340,23 +343,13 @@ load_acl() {
 			[ -n "$(get_cache_var "ACL_${sid}_dns_port")" ] && dns_redirect_port=$(get_cache_var "ACL_${sid}_dns_port")
 			[ -n "$node" ] && node_remark=$(config_n_get $node remarks)
 
-			write_ipset_direct=${write_ipset_direct:-1}
-			[ "${write_ipset_direct}" = "1" ] && {
-				if [ -n "$(get_cache_var "ACL_${sid}_default")" ]; then
-					local ipset_white=${ipset_global_white}
-					local ipset_white6=${ipset_global_white6}
-					shunt_list4=${SHUNT_LIST4}
-					shunt_list6=${SHUNT_LIST6}
-				else
-					local ipset_white="passwall2_${sid}_white"
-					local ipset_white6="passwall2_${sid}_white6"
-					ipset -! create $ipset_white nethash maxelem 1048576
-					ipset -! create $ipset_white6 nethash family inet6 maxelem 1048576
-
-					# Shunt rules IP list (import when use shunt node)
-					gen_shunt_list "${node}" shunt_list4 shunt_list6 ${write_ipset_direct} ${ipset_white} ${ipset_white6}
-				fi
-			}
+			if [ -n "$(get_cache_var "ACL_${sid}_default")" ]; then
+				shunt_list4=${SHUNT_LIST4}
+				shunt_list6=${SHUNT_LIST6}
+			else
+				# Shunt rules IP list (import when use shunt node)
+				gen_shunt_list "${node}" shunt_list4 shunt_list6
+			fi
 			
 			_acl_list=${TMP_ACL_PATH}/${sid}/source_list
 
@@ -508,7 +501,7 @@ load_acl() {
 				[ "$_ipv4" != "1" ] && $ip6t_m -A PSW2 $(comment "$remarks") ${_ipt_source} -p udp -j RETURN 2>/dev/null
 				unset ipt_tmp ipt_j _ipt_source msg msg2 _ipv4
 			done
-			unset enabled sid remarks sources tcp_no_redir_ports udp_no_redir_ports tcp_redir_ports udp_redir_ports node interface write_ipset_direct
+			unset enabled sid remarks sources tcp_no_redir_ports udp_no_redir_ports tcp_redir_ports udp_redir_ports node interface
 			unset node_remark _acl_list
 		done
 	}
@@ -670,10 +663,12 @@ add_firewall_rule() {
 	log_i18n 0 "Starting to load %s firewall rules..." "iptables"
 	
 	ipset -! create $IPSET_LOCAL nethash maxelem 1048576
+	ipset -! create $IPSET_WAN nethash maxelem 1048576
 	ipset -! create $IPSET_LAN nethash maxelem 1048576
 	ipset -! create $IPSET_VPS nethash maxelem 1048576
 
 	ipset -! create $IPSET_LOCAL6 nethash family inet6 maxelem 1048576
+	ipset -! create $IPSET_WAN6 nethash family inet6 maxelem 1048576
 	ipset -! create $IPSET_LAN6 nethash family inet6 maxelem 1048576
 	ipset -! create $IPSET_VPS6 nethash family inet6 maxelem 1048576
 	
@@ -723,15 +718,9 @@ add_firewall_rule() {
 			log_i18n 1 "$(i18n "Add ISP %s DNS to the whitelist: %s" "IPv6" "${ispip6}")"
 		done
 	}
-	
-	local ipset_global_white="passwall2_global_white"
-	local ipset_global_white6="passwall2_global_white6"
-	ipset -! create $ipset_global_white nethash maxelem 1048576 timeout 259200
-	ipset -! create $ipset_global_white6 nethash family inet6 maxelem 1048576 timeout 259200
-
 
 	# Shunt rules IP list (import when use shunt node)
-	gen_shunt_list "${NODE}" SHUNT_LIST4 SHUNT_LIST6 ${WRITE_IPSET_DIRECT} ${ipset_global_white} ${ipset_global_white6}
+	gen_shunt_list "${NODE}" SHUNT_LIST4 SHUNT_LIST6
 
 	# Filter all node IPs
 	filter_vpsip > /dev/null 2>&1 &
@@ -749,9 +738,6 @@ add_firewall_rule() {
 	$ipt_n -N PSW2
 	$ipt_n -A PSW2 $(dst $IPSET_LAN) -j RETURN
 	$ipt_n -A PSW2 $(dst $IPSET_VPS) -j RETURN
-
-	WAN_IP=$(get_wan_ip)
-	[ ! -z "${WAN_IP}" ] && $ipt_n -A PSW2 $(comment "WAN_IP_RETURN") -d "${WAN_IP}" -j RETURN
 	
 	[ "$accept_icmp" = "1" ] && insert_rule_after "$ipt_n" "PREROUTING" "prerouting_rule" "-p icmp -j PSW2"
 	[ -z "${is_tproxy}" ] && insert_rule_after "$ipt_n" "PREROUTING" "prerouting_rule" "-p tcp -j PSW2"
@@ -780,9 +766,17 @@ add_firewall_rule() {
 	$ipt_m -A PSW2 $(dst $IPSET_LAN) -j RETURN
 	$ipt_m -A PSW2 $(dst $IPSET_VPS) -j RETURN
 	$ipt_m -A PSW2 -m conntrack --ctdir REPLY -j RETURN
-	
-	[ ! -z "${WAN_IP}" ] && $ipt_m -A PSW2 $(comment "WAN_IP_RETURN") -d "${WAN_IP}" -j RETURN
-	unset WAN_IP
+
+	WAN_IP=$(get_wan_ips ip4)
+	[ -n "${WAN_IP}" ] && {
+		ipset -F $IPSET_WAN
+		for wan_ip in $WAN_IP; do
+			ipset -! add $IPSET_WAN ${wan_ip}
+		done
+		$ipt_n -A PSW2 $(comment "WAN_IP_RETURN") $(dst $IPSET_WAN) -j RETURN
+		$ipt_m -A PSW2 $(comment "WAN_IP_RETURN") $(dst $IPSET_WAN) -j RETURN
+	}
+	unset WAN_IP wan_ip
 
 	insert_rule_before "$ipt_m" "PREROUTING" "mwan3" "-j PSW2"
 
@@ -835,9 +829,15 @@ add_firewall_rule() {
 	$ip6t_m -A PSW2 $(dst $IPSET_VPS6) -j RETURN
 	$ip6t_m -A PSW2 -m conntrack --ctdir REPLY -j RETURN
 	
-	WAN6_IP=$(get_wan6_ip)
-	[ ! -z "${WAN6_IP}" ] && $ip6t_m -A PSW2 $(comment "WAN6_IP_RETURN") -d ${WAN6_IP} -j RETURN
-	unset WAN6_IP
+	WAN6_IP=$(get_wan_ips ip6)
+	[ -n "${WAN6_IP}" ] && {
+		ipset -F $IPSET_WAN6
+		for wan6_ip in $WAN6_IP; do
+			ipset -! add $IPSET_WAN6 ${wan6_ip}
+		done
+		$ip6t_m -A PSW2 $(comment "WAN6_IP_RETURN") $(dst $IPSET_WAN6) -j RETURN
+	}
+	unset WAN6_IP wan6_ip
 
 	insert_rule_before "$ip6t_m" "PREROUTING" "mwan3" "-j PSW2"
 
@@ -1003,11 +1003,11 @@ del_firewall_rule() {
 	ip -6 rule del fwmark 1 table 100 2>/dev/null
 	ip -6 route del local ::/0 dev lo table 100 2>/dev/null
 
-	$DIR/app.sh log_i18n 0 "Delete %s rules is complete." "iptables"
+	log_i18n 0 "Delete %s rules is complete." "iptables"
 }
 
 flush_ipset() {
-	$DIR/app.sh log_i18n 0 "Clear %s." "IPSet"
+	log_i18n 0 "Clear %s." "IPSet"
 	for _name in $(ipset list | grep "Name: " | grep "passwall2_" | awk '{print $2}'); do
 		destroy_ipset ${_name}
 	done
@@ -1042,17 +1042,13 @@ gen_include() {
 
 			\$(${MY_PATH} insert_rule_before "$ipt_m" "PREROUTING" "mwan3" "-j PSW2")
 
-			WAN_IP=\$(${MY_PATH} get_wan_ip)
-
-			PR_INDEX=\$(${MY_PATH} RULE_LAST_INDEX "$ipt_n" PSW2 WAN_IP_RETURN -1)
-			if [ \$PR_INDEX -ge 0 ]; then
-				[ ! -z "\${WAN_IP}" ] && $ipt_n -R PSW2 \$PR_INDEX $(comment "WAN_IP_RETURN") -d "\${WAN_IP}" -j RETURN
-			fi
-
-			PR_INDEX=\$(${MY_PATH} RULE_LAST_INDEX "$ipt_m" PSW2 WAN_IP_RETURN -1)
-			if [ \$PR_INDEX -ge 0 ]; then
-				[ ! -z "\${WAN_IP}" ] && $ipt_m -R PSW2 \$PR_INDEX $(comment "WAN_IP_RETURN") -d "\${WAN_IP}" -j RETURN
-			fi
+			WAN_IP=\$(${MY_PATH} get_wan_ips ip4)
+			[ ! -z "\${WAN_IP}" ] && {
+				ipset -F $IPSET_WAN
+				for wan_ip in \$WAN_IP; do
+					ipset -! add $IPSET_WAN \${wan_ip}
+				done
+			}
 		EOF
 		)
 	}
@@ -1069,11 +1065,13 @@ gen_include() {
 
 			\$(${MY_PATH} insert_rule_before "$ip6t_m" "PREROUTING" "mwan3" "-j PSW2")
 
-			PR_INDEX=\$(${MY_PATH} RULE_LAST_INDEX "$ip6t_m" PSW2 WAN6_IP_RETURN -1)
-			if [ \$PR_INDEX -ge 0 ]; then
-				WAN6_IP=\$(${MY_PATH} get_wan6_ip)
-				[ ! -z "\${WAN6_IP}" ] && $ip6t_m -R PSW2 \$PR_INDEX $(comment "WAN6_IP_RETURN") -d "\${WAN6_IP}" -j RETURN
-			fi
+			WAN6_IP=\$(${MY_PATH} get_wan_ips ip6)
+			[ ! -z "\${WAN6_IP}" ] && {
+				ipset -F $IPSET_WAN6
+				for wan6_ip in \$WAN6_IP; do
+					ipset -! add $IPSET_WAN6 \${wan6_ip}
+				done
+			}
 		EOF
 		)
 	}
@@ -1102,6 +1100,7 @@ start() {
 }
 
 stop() {
+	[ -z "$(command -v log_i18n)" ] && . /usr/share/passwall2/utils.sh
 	del_firewall_rule
 	[ $(config_t_get global flush_set "0") = "1" ] && {
 		uci -q delete ${CONFIG}.@global[0].flush_set
@@ -1131,11 +1130,8 @@ get_ipt_bin)
 get_ip6t_bin)
 	get_ip6t_bin
 	;;
-get_wan_ip)
-	get_wan_ip
-	;;
-get_wan6_ip)
-	get_wan6_ip
+get_wan_ips)
+	get_wan_ips
 	;;
 filter_direct_node_list)
 	filter_direct_node_list
