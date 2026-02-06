@@ -4,14 +4,13 @@ local api = require "luci.passwall.api"
 <script src="<%=resource%>/view/<%=api.appname%>/Sortable.min.js?v=26.1.9"></script>
 
 <style>
-<% if api.is_js_luci() then -%>
 table .cbi-button-up,
 table .cbi-button-down {
 	display: none !important;
 }
-<%- end %>
 
 .drag-handle {
+	vertical-align: middle;
 	cursor: grab !important;
 	display: inline-flex;
 	align-items: center;
@@ -21,8 +20,12 @@ table .cbi-button-down {
 	padding: 0 !important;
 	line-height: inherit;
 	user-select: none;
-	color: #00000070;
 	align-self: stretch;
+	background-color: transparent;
+}
+
+.drag-handle:hover {
+	background: transparent;
 }
 
 .dragging-row {
@@ -78,24 +81,25 @@ table .cbi-button-down {
 	});
 
 	//节点列表添加拖拽排序
-	(function () {
+	document.addEventListener("DOMContentLoaded", function () {
 		function initSortableForTable() {
 			var section = document.getElementById("cbi-<%=api.appname%>-haproxy_config");
 			if (!section) return;
 
+			hideSortColumn(section);
+
 			// === 插入 drag handle ===
-			var delBtns = section.getElementsByClassName("cbi-button-remove");
-			for (var i = 0; i < delBtns.length; i++) {
-				var btn = delBtns[i];
-				var parent = btn && btn.parentNode;
-				if (!parent || parent.getElementsByClassName("drag-handle").length)
-					continue;
+			var rows = section.querySelectorAll("tr");
+			rows.forEach(function(row) {
+				var btn = row.querySelector(".cbi-button-remove:last-of-type");
+				if (!btn) return;
+				if (btn.nextElementSibling && btn.nextElementSibling.classList.contains("drag-handle")) return;
 				var handle = document.createElement("span");
 				handle.className = "drag-handle center";
 				handle.title = "<%:Drag to reorder%>";
 				handle.innerHTML = "⠿";
-				parent.insertBefore(handle, btn.nextSibling);
-			}
+				btn.after(handle);
+			});
 
 			// === 初始化 Sortable ===
 			var table = section.getElementsByTagName("table")[0];
@@ -150,6 +154,37 @@ table .cbi-button-down {
 			}
 		}
 
+		// 隐藏18.06 up/down 列
+		function hideSortColumn(section) {
+			var table = section.querySelector("table");
+			if (!table) return;
+			var ths = Array.prototype.slice.call(table.querySelectorAll("tr.cbi-section-table-titles > th"));
+			var dataRows = table.querySelectorAll("tr.cbi-section-table-row");
+			if (!ths.length || !dataRows.length) return;
+			var sortCol = -1;
+			for (var i = 0; i < ths.length; i++) {
+				var hasSort = false, invalid = false;
+				dataRows.forEach(function(tr) {
+					var td = tr.querySelectorAll(":scope > td")[i];
+					if (!td) return;
+					if (td.querySelector(".cbi-button-edit, .cbi-button-remove")) invalid = true;
+					if (td.querySelector(".cbi-button-up, .cbi-button-down")) hasSort = true;
+				});
+				if (!invalid && hasSort) { sortCol = i; break; }
+			}
+			if (sortCol === -1) return;
+			var rows = [table.querySelector("tr.cbi-section-table-titles")].concat(
+				Array.prototype.slice.call(dataRows),
+				Array.prototype.slice.call(table.querySelectorAll("tr.cbi-section-table-descr"))
+			);
+			rows.forEach(function(tr) {
+				var cells = Array.prototype.filter.call(tr.children, function(el) {
+					return el.tagName === "TH" || el.tagName === "TD";
+				});
+				if (cells[sortCol]) cells[sortCol].style.display = "none";
+			});
+		}
+
 		// === 等待 TypedSection 行稳定 ===
 		(function waitStable() {
 			var last = 0, stable = 0;
@@ -161,12 +196,12 @@ table .cbi-button-down {
 
 				last = count;
 				if (stable >= THRESHOLD)
-					initSortableForTable();
+					setTimeout(initSortableForTable, 200);
 				else
 					requestAnimationFrame(tick);
 			}
 			tick();
 		})();
-	})();
+	});
 	//]]>
 </script>
